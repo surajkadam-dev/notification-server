@@ -9,17 +9,20 @@ const bodyParser = require("body-parser");
 
 // Fix private key formatting
 
-console.log("PROJECT_ID:", process.env.FIREBASE_PROJECT_ID1);
-console.log("CLIENT_EMAIL:", process.env.FIREBASE_CLIENT_EMAIL);
-console.log("PRIVATE_KEY EXISTS:", !!process.env.FIREBASE_PRIVATE_KEY);
 // Initialize Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID1,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  }),
-});
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+  });
+
+  console.log("✅ Firebase initialized");
+} catch (err) {
+  console.error("❌ Firebase init error:", err);
+}
 
 const db = admin.firestore();
 
