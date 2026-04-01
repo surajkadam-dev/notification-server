@@ -5,16 +5,18 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 
 // Parse service account from ENV
-const serviceAccount = JSON.parse(
-  process.env.FIREBASE_SERVICE_ACCOUNT
-);
+
 
 // Fix private key formatting
-serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+
 
 // Initialize Firebase Admin
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
 });
 
 const db = admin.firestore();
@@ -32,7 +34,6 @@ app.get("/", (req, res) => {
 app.post("/send-notification", async (req, res) => {
   try {
     const { receiverId, message, chatId } = req.body;
-    console.log("body: ",req.body);
 
     if (!receiverId || !message) {
       return res.status(400).json({ error: "Missing fields" });
