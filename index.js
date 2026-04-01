@@ -32,6 +32,7 @@ app.get("/", (req, res) => {
 app.post("/send-notification", async (req, res) => {
   try {
     const { receiverId, message, chatId } = req.body;
+    console.log("body: ",req.body);
 
     if (!receiverId || !message) {
       return res.status(400).json({ error: "Missing fields" });
