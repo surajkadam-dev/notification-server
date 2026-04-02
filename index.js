@@ -12,8 +12,8 @@ admin.initializeApp({
 })
 
 const db = admin.firestore();
-
-console.log("id: ",admin.app().options.projectId());
+console.log("project: ",serviceAccount.project_id)
+console.log("email: ",serviceAccount.client_email)
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
