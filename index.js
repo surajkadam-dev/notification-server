@@ -3,12 +3,16 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 
+
 // ✅ Import Firebase config
 const { initFirebase, getDb, admin } = require("./config/firebase");
 
 // 🔥 Initialize Firebase
 initFirebase();
 const db = getDb();
+
+
+
 
 const app = express();
 app.use(cors());
@@ -26,6 +30,7 @@ app.get("/test-firestore", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 /* =========================
    🔔 SEND NOTIFICATION
