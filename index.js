@@ -25,7 +25,7 @@ try {
 }
 
 const db = admin.firestore();
-console.log("id: ",admin.app().options.projectId());
+console.log("id: ",admin.app().options.projectIds);
 
 const app = express();
 app.use(cors());
