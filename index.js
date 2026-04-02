@@ -4,29 +4,16 @@ const admin = require("firebase-admin");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 
-// Parse service account from ENV
-
-
-// Fix private key formatting
-
-// Initialize Firebase Admin
-try {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    }),
-  });
-
-  console.log("✅ Firebase initialized");
-} catch (err) {
-  console.error("❌ Firebase init error:", err);
-}
+const serviceAccount=JSON.parse(
+  Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,"base64").toString("utf-8")
+)
+admin.initializeApp({
+  credential:admin.credential.cert(serviceAccount)
+})
 
 const db = admin.firestore();
-console.log("id: ",admin.app().options.projectId);
 
+console.log("id: ",admin.app().options.projectId());
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
