@@ -1,34 +1,35 @@
 require("dotenv").config();
 const express = require("express");
-const admin = require("firebase-admin");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 
-// Parse service account from ENV
-const serviceAccount = JSON.parse(
-  process.env.FIREBASE_SERVICE_ACCOUNT
-);
+// ✅ Import Firebase config
+const { initFirebase, getDb, admin } = require("./config/firebase");
 
-// Fix private key formatting
-serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-
-// Initialize Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
-const db = admin.firestore();
+// 🔥 Initialize Firebase
+initFirebase();
+const db = getDb();
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Health check route
-app.get("/", (req, res) => {
-  res.send("🚀 Notification server is running");
+/* =========================
+   🧪 TEST FIRESTORE
+========================= */
+app.get("/test-firestore", async (req, res) => {
+  try {
+    const snapshot = await db.collection("users").limit(1).get();
+    res.json({ success: true, count: snapshot.size });
+  } catch (error) {
+    console.error("❌ Firestore error:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// 🔔 Send notification API
+/* =========================
+   🔔 SEND NOTIFICATION
+========================= */
 app.post("/send-notification", async (req, res) => {
   try {
     const { receiverId, message, chatId } = req.body;
@@ -37,7 +38,7 @@ app.post("/send-notification", async (req, res) => {
       return res.status(400).json({ error: "Missing fields" });
     }
 
-    // Get user FCM token
+    // 🔥 Get receiver token
     const userDoc = await db.collection("users").doc(receiverId).get();
 
     if (!userDoc.exists) {
@@ -50,8 +51,10 @@ app.post("/send-notification", async (req, res) => {
       return res.status(400).json({ error: "No FCM token found" });
     }
 
-    // Send notification
-    await admin.messaging().send({
+    console.log("📲 Sending to token:", token);
+
+    // 🔥 Send notification
+    const response = await admin.messaging().send({
       token: token,
       notification: {
         title: "New Message",
@@ -62,15 +65,20 @@ app.post("/send-notification", async (req, res) => {
       },
     });
 
-    res.json({ success: true });
+    console.log("✅ FCM Response:", response);
+
+    res.json({ success: true, response });
   } catch (error) {
-    console.error("❌ Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("❌ Notification error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Start server
+/* =========================
+   🚀 START SERVER
+========================= */
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
