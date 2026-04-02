@@ -22,6 +22,15 @@ app.use(bodyParser.json());
 app.get("/", (req, res) => {
   res.send("🚀 Notification server is running");
 });
+app.get("/test-firestore", async (req, res) => {
+  try {
+    const snapshot = await db.collection("users").limit(1).get();
+    res.json({ success: true, count: snapshot.size });
+  } catch (e) {
+    console.error("Firestore error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // 🔔 Send notification API
 app.post("/send-notification", async (req, res) => {
