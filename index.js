@@ -294,7 +294,7 @@ app.post("/complete-work", authenticate, async (req, res) => {
   if (chat.paymentStatus !== "escrow") {
     return res.status(400).json({ error: "Payment not in escrow" });
   }
-  await chatRef.set({ paymentStatus: "completed" ,hasDispute:false,completedAt:new Date()},{merge:true});
+  await chatRef.set({ paymentStatus: "completed" ,completedAt:new Date()},{merge:true});
   res.json({ success: true });
 });
 
