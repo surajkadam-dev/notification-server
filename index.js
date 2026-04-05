@@ -294,7 +294,7 @@ app.post("/complete-work", authenticate, async (req, res) => {
   if (chat.paymentStatus !== "escrow") {
     return res.status(400).json({ error: "Payment not in escrow" });
   }
-  await chatRef.update({ paymentStatus: "completed" });
+  await chatRef.set({ paymentStatus: "completed" ,hasDispute:false,completedAt:new Date()},{merge:true});
   res.json({ success: true });
 });
 
@@ -317,9 +317,11 @@ app.post("/approve-work", authenticate, async (req, res) => {
     return res.status(400).json({ error: "Work not completed yet" });
   }
 
-  await chatRef.update({
-    paymentStatus: "released"
-  });
+  await chatRef.set({
+    paymentStatus: "released",
+    hasDispute:false,
+    releasedAt:new Date(),
+  },{merge:true});
 
   res.json({ success: true });
 });
@@ -336,8 +338,8 @@ app.post("/release-payment", authenticate, async (req, res) => {
   if (chat.ownerId !== userId) {
     return res.status(403).json({ error: "Only owner can release payment" });
   }
-  if (chat.paymentStatus !== "completed") {
-    return res.status(400).json({ error: "Work not marked as completed yet" });
+  if (chat.paymentStatus !== "completed" || chat.hasDispute===true) {
+    return res.status(400).json({error:chat.hasDispute ? "Resolve the dispute before releasing payement" :"Work not maeked as completed yet" });
   }
 
   // Get transaction
@@ -353,7 +355,7 @@ app.post("/release-payment", authenticate, async (req, res) => {
   // Firestore transaction to update wallet & records
   await db.runTransaction(async (t) => {
     t.update(txDoc.ref, { status: "released" });
-    t.update(chatRef, { paymentStatus: "released" });
+    t.update(chatRef, { paymentStatus: "released",hasDispute:false,disputeReason:admin.firestore.FieldValue.delete()});
 
     const walletRef = db.collection("wallets").doc(transaction.helperId);
     const walletDoc = await t.get(walletRef);
