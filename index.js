@@ -292,6 +292,32 @@ app.post("/complete-work", authenticate, async (req, res) => {
   res.json({ success: true });
 });
 
+app.post("/approve-work", authenticate, async (req, res) => {
+  const { chatId } = req.body;
+  const userId = req.user.uid;
+
+  const chatRef = db.collection("chats").doc(chatId);
+  const chatDoc = await chatRef.get();
+
+  if (!chatDoc.exists) return res.status(404).json({ error: "Chat not found" });
+
+  const chat = chatDoc.data();
+
+  if (chat.ownerId !== userId) {
+    return res.status(403).json({ error: "Only owner can approve" });
+  }
+
+  if (chat.paymentStatus !== "completed") {
+    return res.status(400).json({ error: "Work not completed yet" });
+  }
+
+  await chatRef.update({
+    paymentStatus: "released"
+  });
+
+  res.json({ success: true });
+});
+
 // ========== 7. OWNER RELEASES PAYMENT ==========
 app.post("/release-payment", authenticate, async (req, res) => {
   const { chatId } = req.body;
