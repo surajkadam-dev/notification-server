@@ -26,7 +26,13 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-
+app.get("/env-check", (req, res) => {
+  res.json({
+    key: process.env.RAZORPAY_KEY_ID ? "OK" : "MISSING",
+    secret: process.env.RAZORPAY_KEY_SECRET ? "OK" : "MISSING",
+    webhook: process.env.RAZORPAY_WEBHOOK_SECRET ? "OK" : "MISSING",
+  });
+});
 // ---------- Helper: Verify Firebase ID Token ----------
 async function authenticate(req, res, next) {
   const token = req.headers.authorization?.split("Bearer ")[1];
