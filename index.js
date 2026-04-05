@@ -166,14 +166,19 @@ app.post("/verify-payment", authenticate, async (req, res) => {
 
     // 2. Fetch chat (never trust frontend amount)
     const chatRef = db.collection("chats").doc(chatId);
+   
     const chatDoc = await chatRef.get();
     if (!chatDoc.exists) return res.status(404).json({ error: "Chat not found" });
     const chat = chatDoc.data();
+ 
 
     if (chat.ownerId !== userId) {
       return res.status(403).json({ error: "Not authorized" });
     }
-
+ if(!chat.gigId){
+   return res.status(400).json({error:"gigId missing"});
+ }
+      const gigRef=db.collection("gigs").doc(chat.gigId);
     // 3. Calculate backend values
     const amount = chat.finalAmount;
     const platformFee = Math.round(amount * 0.1);
@@ -208,6 +213,7 @@ app.post("/verify-payment", authenticate, async (req, res) => {
 
     // 6. Update chat payment status
     await chatRef.update({ paymentStatus: "escrow" });
+    await gigRef.update({ paymentStatus: "escrow" });
 
     res.json({ success: true, transactionId });
   } catch (err) {
@@ -358,6 +364,7 @@ app.post("/approve-work", authenticate, async (req, res) => {
       const currentWithdrawn = walletDoc.exists
         ? walletDoc.data().totalWithdrawn || 0
         : 0;
+      const gigRef=db.collection("gigs").doc(chat.gigId);
 
       // ✅ 2. THEN WRITE
 
@@ -374,6 +381,11 @@ app.post("/approve-work", authenticate, async (req, res) => {
         disputeReason: admin.firestore.FieldValue.delete(),
         releasedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      t.set(gigRef,{
+        status:"completed",
+        paymentStatus:"released",
+        completedAt:admin.firestore.FieldValue.serverTimestamp()},{merge:true});
 
       // Update wallet
       t.set(
