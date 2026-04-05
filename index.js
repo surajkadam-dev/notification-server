@@ -145,6 +145,7 @@ app.post("/verify-payment", authenticate, async (req, res) => {
     chatId,
   } = req.body;
   const userId = req.user.uid;
+  console.log("payment verified: ");
 
   try {
     // 1. Verify signature
@@ -213,7 +214,7 @@ app.post("/verify-payment", authenticate, async (req, res) => {
 app.post("/webhook", async (req, res) => {
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers["x-razorpay-signature"];
-
+console.log("webhook hit");
   const body = req.body.toString();
   const expectedSignature = crypto
     .createHmac("sha256", webhookSecret)
