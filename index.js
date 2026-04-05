@@ -340,23 +340,10 @@ app.post("/approve-work", authenticate, async (req, res) => {
     const txDoc = txQuery.docs[0];
     const transaction = txDoc.data();
 
-    // 🔥 FIRESTORE TRANSACTION (atomic)
+    // 🔥 FIRESTORE TRANSACTION (FIXED ORDER)
     await db.runTransaction(async (t) => {
-      // 1️⃣ Update transaction status
-      t.update(txDoc.ref, {
-        status: "released",
-        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
 
-      // 2️⃣ Update chat (🔥 IMPORTANT PART)
-      t.update(chatRef, {
-        paymentStatus: "released",
-        hasDispute: false, // ✅ CLEAR DISPUTE HERE
-        disputeReason: admin.firestore.FieldValue.delete(), // ✅ REMOVE REASON
-        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // 3️⃣ Update / create wallet
+      // ✅ 1. READ FIRST (VERY IMPORTANT)
       const walletRef = db.collection("wallets").doc(transaction.helperId);
       const walletDoc = await t.get(walletRef);
 
@@ -372,6 +359,23 @@ app.post("/approve-work", authenticate, async (req, res) => {
         ? walletDoc.data().totalWithdrawn || 0
         : 0;
 
+      // ✅ 2. THEN WRITE
+
+      // Update transaction
+      t.update(txDoc.ref, {
+        status: "released",
+        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update chat (🔥 clears dispute)
+      t.update(chatRef, {
+        paymentStatus: "released",
+        hasDispute: false,
+        disputeReason: admin.firestore.FieldValue.delete(),
+        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Update wallet
       t.set(
         walletRef,
         {
@@ -384,7 +388,7 @@ app.post("/approve-work", authenticate, async (req, res) => {
         { merge: true }
       );
 
-      // 4️⃣ Add wallet transaction history
+      // Wallet transaction log
       const walletTxRef = db.collection("wallet_transactions").doc();
 
       t.set(walletTxRef, {
@@ -400,10 +404,12 @@ app.post("/approve-work", authenticate, async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Work approved and payment released successfully",
+      message: "Work approved & payment released successfully",
     });
+
   } catch (error) {
     console.error("Approve work error:", error);
+
     return res.status(500).json({
       error: "Internal server error",
       details: error.message,
