@@ -299,31 +299,116 @@ app.post("/complete-work", authenticate, async (req, res) => {
 });
 
 app.post("/approve-work", authenticate, async (req, res) => {
-  const { chatId } = req.body;
-  const userId = req.user.uid;
+  try {
+    const { chatId } = req.body;
+    const userId = req.user.uid;
 
-  const chatRef = db.collection("chats").doc(chatId);
-  const chatDoc = await chatRef.get();
+    if (!chatId) {
+      return res.status(400).json({ error: "chatId is required" });
+    }
 
-  if (!chatDoc.exists) return res.status(404).json({ error: "Chat not found" });
+    const chatRef = db.collection("chats").doc(chatId);
+    const chatDoc = await chatRef.get();
 
-  const chat = chatDoc.data();
+    if (!chatDoc.exists) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
 
-  if (chat.ownerId !== userId) {
-    return res.status(403).json({ error: "Only owner can approve" });
+    const chat = chatDoc.data();
+
+    // ✅ Only owner can approve
+    if (chat.ownerId !== userId) {
+      return res.status(403).json({ error: "Only owner can approve work" });
+    }
+
+    // ✅ Work must be completed first
+    if (chat.paymentStatus !== "completed") {
+      return res.status(400).json({ error: "Work not marked as completed yet" });
+    }
+
+    // 🔥 GET TRANSACTION
+    const txQuery = await db
+      .collection("transactions")
+      .where("chatId", "==", chatId)
+      .limit(1)
+      .get();
+
+    if (txQuery.empty) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    const txDoc = txQuery.docs[0];
+    const transaction = txDoc.data();
+
+    // 🔥 FIRESTORE TRANSACTION (atomic)
+    await db.runTransaction(async (t) => {
+      // 1️⃣ Update transaction status
+      t.update(txDoc.ref, {
+        status: "released",
+        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2️⃣ Update chat (🔥 IMPORTANT PART)
+      t.update(chatRef, {
+        paymentStatus: "released",
+        hasDispute: false, // ✅ CLEAR DISPUTE HERE
+        disputeReason: admin.firestore.FieldValue.delete(), // ✅ REMOVE REASON
+        releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 3️⃣ Update / create wallet
+      const walletRef = db.collection("wallets").doc(transaction.helperId);
+      const walletDoc = await t.get(walletRef);
+
+      const currentBalance = walletDoc.exists
+        ? walletDoc.data().balance || 0
+        : 0;
+
+      const currentEarnings = walletDoc.exists
+        ? walletDoc.data().totalEarnings || 0
+        : 0;
+
+      const currentWithdrawn = walletDoc.exists
+        ? walletDoc.data().totalWithdrawn || 0
+        : 0;
+
+      t.set(
+        walletRef,
+        {
+          userId: transaction.helperId,
+          balance: currentBalance + transaction.helperAmount,
+          totalEarnings: currentEarnings + transaction.helperAmount,
+          totalWithdrawn: currentWithdrawn,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // 4️⃣ Add wallet transaction history
+      const walletTxRef = db.collection("wallet_transactions").doc();
+
+      t.set(walletTxRef, {
+        id: walletTxRef.id,
+        userId: transaction.helperId,
+        type: "credit",
+        amount: transaction.helperAmount,
+        source: "job_payment",
+        referenceId: transaction.id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    return res.json({
+      success: true,
+      message: "Work approved and payment released successfully",
+    });
+  } catch (error) {
+    console.error("Approve work error:", error);
+    return res.status(500).json({
+      error: "Internal server error",
+      details: error.message,
+    });
   }
-
-  if (chat.paymentStatus !== "completed") {
-    return res.status(400).json({ error: "Work not completed yet" });
-  }
-
-  await chatRef.set({
-    paymentStatus: "released",
-    hasDispute:false,
-    releasedAt:new Date(),
-  },{merge:true});
-
-  res.json({ success: true });
 });
 
 // ========== 7. OWNER RELEASES PAYMENT ==========
