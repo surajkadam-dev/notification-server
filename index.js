@@ -26,8 +26,7 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-console.log("key: ",process.env.RAZORPAY_KEY_ID)
-console.log("screate: ",process.env.RAZORPAY_KEY_SECRET)
+
 // ---------- Helper: Verify Firebase ID Token ----------
 async function authenticate(req, res, next) {
   const token = req.headers.authorization?.split("Bearer ")[1];
