@@ -436,8 +436,17 @@ app.post("/approve-work", authenticate, async (req, res) => {
 app.get("/wallet", authenticate, async (req, res) => {
   const userId = req.user.uid;
   const walletDoc = await db.collection("wallets").doc(userId).get();
-  const balance = walletDoc.exists ? walletDoc.data().balance : 0;
-  res.json({ balance });
+  
+  let balance = 0;
+  let totalEarnings = 0;
+  
+  if (walletDoc.exists) {
+    const data = walletDoc.data();
+    balance = data.balance ?? 0;
+    totalEarnings = data.totalEarnings ?? 0;
+  }
+  
+  res.json({ balance, totalEarnings });
 });
 
 app.post("/withdraw", authenticate, async (req, res) => {
