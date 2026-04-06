@@ -593,6 +593,9 @@ app.post("/admin/approve-withdrawal", authenticate, async (req, res) => {
       if (request.status !== "pending") {
         throw new Error("Already processed");
       }
+      const walletRef = db.collection("wallets").doc(request.userId);
+  const walletDoc = await t.get(walletRef);
+            const txRef = db.collection("wallet_transactions").doc();
       const userRef=db.collection("users").doc(request.userId);
       const userDoc=await t.get(userRef);
       const existingUpi = userDoc.exists ? userDoc.data().upiId : null;
@@ -619,9 +622,16 @@ else {
     upiUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
 }
+        const currentWithdrawn = walletDoc.exists
+    ? walletDoc.data().totalWithdrawn || 0
+    : 0;
+        t.set(walletRef, {
+    totalWithdrawn: currentWithdrawn + request.amount,
+    updatedAt: new Date().toISOString()
+  }, { merge: true });
 
       // 🧾 Optional: transaction log (admin payout)
-      const txRef = db.collection("wallet_transactions").doc();
+
       t.set(txRef, {
         id: txRef.id,
         userId: request.userId,
