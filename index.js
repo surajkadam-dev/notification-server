@@ -466,7 +466,7 @@ app.post("/withdraw", authenticate, async (req, res) => {
       t.set(walletRef, {
         userId,
         balance: balance - amount,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: new Date().toISOString(),
       }, { merge: true });
 
       // 📄 Create withdrawal request
@@ -476,7 +476,7 @@ app.post("/withdraw", authenticate, async (req, res) => {
         amount,
         upiId,
         status: "pending",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: new Date().toISOString(),
       });
 
       // 🧾 Wallet transaction log
@@ -488,7 +488,7 @@ app.post("/withdraw", authenticate, async (req, res) => {
         amount,
         source: "withdraw_request",
         referenceId: reqRef.id,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: new Date().toISOString(),
       });
     });
 
@@ -601,7 +601,7 @@ app.post("/admin/approve-withdrawal", authenticate, async (req, res) => {
       // ✅ Update request
       t.update(reqRef, {
         status: "approved",
-        approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+        approvedAt: new Date().toISOString(),
       });
       if (!existingUpi) {
   t.set(userRef, {
@@ -629,7 +629,7 @@ else {
         amount: request.amount,
         source: "withdrawal_approved",
         referenceId: requestId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: new Date().toISOString(),
       });
     });
 
@@ -682,7 +682,7 @@ app.post("/admin/reject-withdrawal", authenticate, async (req, res) => {
       t.update(reqRef, {
         status: "rejected",
         rejectionReason: reason,
-        rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+        rejectedAt: new Date().toISOString(),
       });
 
       // 🔁 Refund wallet
@@ -707,7 +707,7 @@ app.post("/admin/reject-withdrawal", authenticate, async (req, res) => {
         source: "withdrawal_rejected",
         referenceId: requestId,
         note: reason,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: new Date().toISOString(),
       });
     });
 
