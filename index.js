@@ -430,66 +430,7 @@ app.post("/approve-work", authenticate, async (req, res) => {
 });
 
 // ========== 7. OWNER RELEASES PAYMENT ==========
-app.post("/release-payment", authenticate, async (req, res) => {
-  const { chatId } = req.body;
-  const userId = req.user.uid;
 
-  const chatRef = db.collection("chats").doc(chatId);
-  const chatDoc = await chatRef.get();
-  if (!chatDoc.exists) return res.status(404).json({ error: "Chat not found" });
-  const chat = chatDoc.data();
-  if (chat.ownerId !== userId) {
-    return res.status(403).json({ error: "Only owner can release payment" });
-  }
-  if (chat.paymentStatus !== "completed" || chat.hasDispute===true) {
-    return res.status(400).json({error:chat.hasDispute ? "Resolve the dispute before releasing payement" :"Work not maeked as completed yet" });
-  }
-
-  // Get transaction
-  const txQuery = await db
-    .collection("transactions")
-    .where("chatId", "==", chatId)
-    .limit(1)
-    .get();
-  if (txQuery.empty) return res.status(404).json({ error: "Transaction not found" });
-  const txDoc = txQuery.docs[0];
-  const transaction = txDoc.data();
-
-  // Firestore transaction to update wallet & records
-  await db.runTransaction(async (t) => {
-    t.update(txDoc.ref, { status: "released" });
-    t.update(chatRef, { paymentStatus: "released",hasDispute:false,disputeReason:admin.firestore.FieldValue.delete()});
-
-    const walletRef = db.collection("wallets").doc(transaction.helperId);
-    const walletDoc = await t.get(walletRef);
-    const currentBalance = walletDoc.exists ? walletDoc.data().balance : 0;
-    const currentEarnings = walletDoc.exists ? walletDoc.data().totalEarnings : 0;
-    t.set(
-      walletRef,
-      {
-        userId: transaction.helperId,
-        balance: currentBalance + transaction.helperAmount,
-        totalEarnings: currentEarnings + transaction.helperAmount,
-        totalWithdrawn: walletDoc.exists ? walletDoc.data().totalWithdrawn : 0,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    const walletTxRef = db.collection("wallet_transactions").doc();
-    t.set(walletTxRef, {
-      id: walletTxRef.id,
-      userId: transaction.helperId,
-      type: "credit",
-      amount: transaction.helperAmount,
-      source: "job_payment",
-      referenceId: transaction.id,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-
-  res.json({ success: true });
-});
 
 // ========== 8. GET WALLET BALANCE ==========
 app.get("/wallet", authenticate, async (req, res) => {
@@ -499,94 +440,269 @@ app.get("/wallet", authenticate, async (req, res) => {
   res.json({ balance });
 });
 
-// ========== 9. REQUEST WITHDRAWAL ==========
-app.post("/withdraw-request", authenticate, async (req, res) => {
+app.post("/withdraw", authenticate, async (req, res) => {
   const { amount, upiId } = req.body;
   const userId = req.user.uid;
 
-  if (!amount || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
-  if (!upiId) return res.status(400).json({ error: "UPI ID required" });
-
-  const walletRef = db.collection("wallets").doc(userId);
-  const walletDoc = await walletRef.get();
-  const balance = walletDoc.exists ? walletDoc.data().balance : 0;
-  if (amount > balance) {
-    return res.status(400).json({ error: "Insufficient balance" });
+  if (!amount || amount <= 0 || !upiId) {
+    return res.status(400).json({ error: "Invalid input" });
   }
 
-  const requestId = db.collection("withdrawal_requests").doc().id;
-  await db.collection("withdrawal_requests").doc(requestId).set({
-    id: requestId,
-    userId,
-    amount,
-    upiId,
-    status: "pending",
-    requestedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-  res.json({ success: true, requestId });
-});
+  try {
+    const walletRef = db.collection("wallets").doc(userId);
+    const reqRef = db.collection("withdrawal_requests").doc();
 
-// ========== 10. PROCESS WITHDRAWAL (ADMIN ONLY) ==========
-app.post("/process-withdrawal", authenticate, async (req, res) => {
-  const { requestId } = req.body;
+    await db.runTransaction(async (t) => {
+      // 🔹 READ wallet (IMPORTANT for rules)
+      const walletDoc = await t.get(walletRef);
+
+      const balance = walletDoc.exists ? walletDoc.data().balance : 0;
+
+      if (balance < amount) {
+        throw new Error("Insufficient balance");
+      }
+
+      // 🔻 Deduct balance immediately
+      t.set(walletRef, {
+        userId,
+        balance: balance - amount,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      // 📄 Create withdrawal request
+      t.set(reqRef, {
+        id: reqRef.id,
+        userId,
+        amount,
+        upiId,
+        status: "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 🧾 Wallet transaction log
+      const txRef = db.collection("wallet_transactions").doc();
+      t.set(txRef, {
+        id: txRef.id,
+        userId,
+        type: "debit",
+        amount,
+        source: "withdraw_request",
+        referenceId: reqRef.id,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.json({ success: true });
+
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.get("/withdrawals", authenticate, async (req, res) => {
   const userId = req.user.uid;
 
-  const adminCheck = await isAdmin(userId);
-  if (!adminCheck) return res.status(403).json({ error: "Admin access required" });
+  try {
+    const snapshot = await db
+      .collection("withdrawal_requests")
+      .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .get();
 
-  const requestRef = db.collection("withdrawal_requests").doc(requestId);
-  const requestDoc = await requestRef.get();
-  if (!requestDoc.exists) return res.status(404).json({ error: "Request not found" });
-  const request = requestDoc.data();
-  if (request.status !== "pending") {
-    return res.status(400).json({ error: "Request already processed" });
+    const data = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({ success: true, data });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
+});
 
-  const walletRef = db.collection("wallets").doc(request.userId);
-  await db.runTransaction(async (t) => {
-    const walletDoc = await t.get(walletRef);
-    const currentBalance = walletDoc.data().balance;
-    if (currentBalance < request.amount) {
-      throw new Error("Insufficient balance");
+app.get("/admin/withdrawals", authenticate, async (req, res) => {
+  try {
+    if(req.user.role !=="admin")
+    {
+      return res.status(403).json({
+        error:"Admin only"
+      })
     }
-    t.update(walletRef, {
-      balance: currentBalance - request.amount,
-      totalWithdrawn: (walletDoc.data().totalWithdrawn || 0) + request.amount,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    t.update(requestRef, {
-      status: "paid",
-      processedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    const snapshot = await db
+      .collection("withdrawal_requests")
+      .orderBy("createdAt", "desc")
+      .get();
 
-    const walletTxRef = db.collection("wallet_transactions").doc();
-    t.set(walletTxRef, {
-      id: walletTxRef.id,
-      userId: request.userId,
-      type: "debit",
-      amount: request.amount,
-      source: "withdrawal",
-      referenceId: requestId,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
+    const data = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-  res.json({ success: true });
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-// ========== 11. ADMIN: GET PENDING WITHDRAWALS ==========
-app.get("/admin/pending-withdrawals", authenticate, async (req, res) => {
-  const userId = req.user.uid;
-  const adminCheck = await isAdmin(userId);
-  if (!adminCheck) return res.status(403).json({ error: "Admin only" });
+app.get("/admin/withdrawals/pending", authenticate, async (req, res) => {
+  try {
+        if(req.user.role !=="admin")
+    {
+      return res.status(403).json({
+        error:"Admin only"
+      })
+    }
+    const snapshot = await db
+      .collection("withdrawal_requests")
+      .where("status", "==", "pending")
+      .orderBy("createdAt", "desc")
+      .get();
 
-  const snapshot = await db
-    .collection("withdrawal_requests")
-    .where("status", "==", "pending")
-    .orderBy("requestedAt", "asc")
-    .get();
-  const requests = snapshot.docs.map((doc) => doc.data());
-  res.json(requests);
+    const data = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post("/admin/approve-withdrawal", authenticate, async (req, res) => {
+  const { requestId } = req.body;
+
+  try {
+        if(req.user.role !=="admin")
+    {
+      return res.status(403).json({
+        error:"Admin only"
+      })
+    }
+    const reqRef = db.collection("withdrawal_requests").doc(requestId);
+
+    await db.runTransaction(async (t) => {
+      const reqDoc = await t.get(reqRef);
+
+      if (!reqDoc.exists) {
+        throw new Error("Request not found");
+      }
+
+      const request = reqDoc.data();
+
+      if (request.status !== "pending") {
+        throw new Error("Already processed");
+      }
+
+      // ✅ Update request
+      t.update(reqRef, {
+        status: "approved",
+        approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 🧾 Optional: transaction log (admin payout)
+      const txRef = db.collection("wallet_transactions").doc();
+      t.set(txRef, {
+        id: txRef.id,
+        userId: request.userId,
+        type: "debit",
+        amount: request.amount,
+        source: "withdrawal_approved",
+        referenceId: requestId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.json({ success: true });
+
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+const allowedReasons = [
+  "Invalid UPI ID",
+  "UPI not linked",
+  "KYC not completed",
+  "Suspicious activity"
+];
+
+app.post("/admin/reject-withdrawal", authenticate, async (req, res) => {
+  const { requestId, reason } = req.body;
+      if(req.user.role !=="admin")
+    {
+      return res.status(403).json({
+        error:"Admin only"
+      })
+    }
+
+  if (!reason || !allowedReasons.includes(reason)) {
+    return res.status(400).json({
+      error: "Invalid rejection reason",
+      allowedReasons
+    });
+  }
+
+  try {
+    const reqRef = db.collection("withdrawal_requests").doc(requestId);
+
+    await db.runTransaction(async (t) => {
+      const reqDoc = await t.get(reqRef);
+
+      if (!reqDoc.exists) {
+        throw new Error("Request not found");
+      }
+
+      const request = reqDoc.data();
+
+      if (request.status !== "pending") {
+        throw new Error("Already processed");
+      }
+
+      // 🔹 Update request with reason
+      t.update(reqRef, {
+        status: "rejected",
+        rejectionReason: reason,
+        rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 🔁 Refund wallet
+      const walletRef = db.collection("wallets").doc(request.userId);
+      const walletDoc = await t.get(walletRef);
+
+      const balance = walletDoc.exists ? walletDoc.data().balance : 0;
+
+      t.set(walletRef, {
+        userId: request.userId,
+        balance: balance + request.amount,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      // 🧾 Wallet transaction
+      const txRef = db.collection("wallet_transactions").doc();
+      t.set(txRef, {
+        id: txRef.id,
+        userId: request.userId,
+        type: "refund",
+        amount: request.amount,
+        source: "withdrawal_rejected",
+        referenceId: requestId,
+        note: reason,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    res.json({ success: true });
+
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+
+
+// ========== START SERVER ==========
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
 
 // ========== START SERVER ==========
