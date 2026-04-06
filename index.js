@@ -579,6 +579,7 @@ app.post("/admin/approve-withdrawal", authenticate, async (req, res) => {
       })
     }
     const reqRef = db.collection("withdrawal_requests").doc(requestId);
+  
 
     await db.runTransaction(async (t) => {
       const reqDoc = await t.get(reqRef);
@@ -592,12 +593,32 @@ app.post("/admin/approve-withdrawal", authenticate, async (req, res) => {
       if (request.status !== "pending") {
         throw new Error("Already processed");
       }
+      const userRef=db.collection("users").doc(request.userId);
+      const userDoc=await t.get(userRef);
+      const existingUpi = userDoc.exists ? userDoc.data().upiId : null;
+      
 
       // ✅ Update request
       t.update(reqRef, {
         status: "approved",
         approvedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      if (!existingUpi) {
+  t.set(userRef, {
+    upiId: request.upiId,
+    upiVerified: true,
+    upiUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}else if (existingUpi === request.upiId) {
+  // keep as is
+}
+else {
+  t.set(userRef, {
+    upiId: request.upiId,
+    upiVerified: true, // ✅ because admin just approved THIS UPI
+    upiUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
 
       // 🧾 Optional: transaction log (admin payout)
       const txRef = db.collection("wallet_transactions").doc();
